@@ -11,7 +11,9 @@ env:
 
 jobs:
 
-  # ── Tests avant tout ──────────────────────────────
+  # ─────────────────────────────────────────────────
+  # JOB 1 : Tests
+  # ─────────────────────────────────────────────────
   test:
     name: ✅ Tests
     runs-on: ubuntu-latest
@@ -43,7 +45,9 @@ jobs:
         env:
           PYTHONPATH: .
 
-  # ── Build et Push de l'image ──────────────────────
+  # ─────────────────────────────────────────────────
+  # JOB 2 : Build et Push
+  # ─────────────────────────────────────────────────
   build-and-push:
     name: 🐳 Build & Push
     runs-on: ubuntu-latest
@@ -52,9 +56,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-
-    outputs:
-      image-tag: ${{ steps.meta.outputs.version }}
 
     steps:
       - name: Récupération du code
@@ -90,7 +91,9 @@ jobs:
           echo "## 🐳 Image publiée" >> $GITHUB_STEP_SUMMARY
           echo "Tags : ${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
 
-  # ── Déploiement de la stack complète ──────────────
+  # ─────────────────────────────────────────────────
+  # JOB 3 : Deploy
+  # ─────────────────────────────────────────────────
   deploy:
     name: 🚀 Deploy Stack Complète
     runs-on: ubuntu-latest
@@ -112,14 +115,14 @@ jobs:
 
       - name: Création du .env de production
         run: |
-          echo "APP_ENV=production"                                                                   > .env
-          echo "APP_VERSION=${{ github.sha }}"                                                       >> .env
-          echo "GITHUB_USERNAME=${{ github.actor }}"                                                 >> .env
-          echo "POSTGRES_DB=${{ secrets.POSTGRES_DB }}"                                              >> .env
-          echo "POSTGRES_USER=${{ secrets.POSTGRES_USER }}"                                          >> .env
-          echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}"                                  >> .env
+          echo "APP_ENV=production"                                                                                                                  > .env
+          echo "APP_VERSION=${{ github.sha }}"                                                                                                     >> .env
+          echo "GITHUB_USERNAME=${{ github.actor }}"                                                                                               >> .env
+          echo "POSTGRES_DB=${{ secrets.POSTGRES_DB }}"                                                                                            >> .env
+          echo "POSTGRES_USER=${{ secrets.POSTGRES_USER }}"                                                                                        >> .env
+          echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}"                                                                                >> .env
           echo "DATABASE_URL=postgresql://${{ secrets.POSTGRES_USER }}:${{ secrets.POSTGRES_PASSWORD }}@postgres:5432/${{ secrets.POSTGRES_DB }}" >> .env
-          echo "REDIS_URL=redis://redis:6379/0"                                                      >> .env
+          echo "REDIS_URL=redis://redis:6379/0"                                                                                                    >> .env
 
       - name: Vérification des clés .env
         run: |
@@ -129,61 +132,118 @@ jobs:
       - name: Pull des nouvelles images
         run: docker compose -f docker-compose.prod.yml pull
 
-      - name: Déploiement de la stack
+      # ✅ PHASE 1 — Démarrer postgres et redis seuls
+      - name: Démarrage PostgreSQL et Redis
         run: |
-          docker compose -f docker-compose.prod.yml up -d \
-            --remove-orphans
+          docker compose -f docker-compose.prod.yml up -d postgres redis
 
-      - name: Attente PostgreSQL healthy
+      # ✅ Attendre PostgreSQL avec boucle manuelle
+      - name: Attente PostgreSQL prêt
         run: |
           echo "Attente de PostgreSQL..."
           for i in $(seq 1 30); do
-            STATUS=$(docker inspect --format='{{.State.Health.Status}}' prod-postgres 2>/dev/null || echo "starting")
-            echo "  → Tentative $i/30 : $STATUS"
-            if [ "$STATUS" = "healthy" ]; then
-              echo "✅ PostgreSQL est healthy !"
+            if docker exec prod-postgres pg_isready -q; then
+              echo "✅ PostgreSQL prêt après $i tentatives"
               break
             fi
+            echo "  → Tentative $i/30 — pas encore prêt..."
             if [ $i -eq 30 ]; then
-              echo "❌ Timeout — logs PostgreSQL :"
+              echo "❌ Timeout PostgreSQL — logs :"
               docker logs prod-postgres
               exit 1
             fi
-            sleep 5
+            sleep 3
           done
 
-      - name: Attente API healthy
+      # ✅ Attendre Redis
+      - name: Attente Redis prêt
         run: |
-          echo "Attente de l'API Flask..."
+          echo "Attente de Redis..."
           for i in $(seq 1 20); do
-            STATUS=$(docker inspect --format='{{.State.Health.Status}}' prod-api 2>/dev/null || echo "starting")
-            echo "  → Tentative $i/20 : $STATUS"
-            if [ "$STATUS" = "healthy" ]; then
-              echo "✅ API est healthy !"
+            if docker exec prod-redis redis-cli ping | grep -q PONG; then
+              echo "✅ Redis prêt après $i tentatives"
               break
             fi
+            echo "  → Tentative $i/20 — pas encore prêt..."
             if [ $i -eq 20 ]; then
-              echo "❌ Timeout — logs API :"
+              echo "❌ Timeout Redis — logs :"
+              docker logs prod-redis
+              exit 1
+            fi
+            sleep 2
+          done
+
+      # ✅ PHASE 2 — Démarrer l'API Flask
+      - name: Démarrage API Flask
+        run: |
+          docker compose -f docker-compose.prod.yml up -d app
+
+      - name: Attente API Flask prête
+        run: |
+          echo "Attente de l'API Flask..."
+          for i in $(seq 1 30); do
+            if docker exec prod-api curl -sf http://localhost:5000/health > /dev/null 2>&1; then
+              echo "✅ API Flask prête après $i tentatives"
+              break
+            fi
+            echo "  → Tentative $i/30 — pas encore prête..."
+            if [ $i -eq 30 ]; then
+              echo "❌ Timeout API — logs :"
               docker logs prod-api
               exit 1
             fi
-            sleep 5
+            sleep 3
           done
 
+      # ✅ PHASE 3 — Démarrer Nginx
+      - name: Démarrage Nginx
+        run: |
+          docker compose -f docker-compose.prod.yml up -d nginx
+
+      - name: Attente Nginx prêt
+        run: |
+          sleep 3
+          echo "Attente de Nginx..."
+          for i in $(seq 1 10); do
+            if curl -sf http://localhost/health > /dev/null 2>&1; then
+              echo "✅ Nginx prêt après $i tentatives"
+              break
+            fi
+            echo "  → Tentative $i/10 — pas encore prêt..."
+            if [ $i -eq 10 ]; then
+              echo "❌ Timeout Nginx — logs :"
+              docker logs prod-nginx
+              exit 1
+            fi
+            sleep 2
+          done
+
+      # ✅ Vérification finale complète
       - name: Vérification finale de la stack
         run: |
           echo "── Statut des containers ──"
           docker compose -f docker-compose.prod.yml ps
 
+          echo ""
           echo "── Test /health ──"
-          curl -f http://localhost/health
+          curl -sf http://localhost/health | python3 -m json.tool
 
+          echo ""
           echo "── Test /ready ──"
-          curl -f http://localhost/ready
+          curl -sf http://localhost/ready | python3 -m json.tool
+
+          echo ""
+          echo "── Test /users ──"
+          curl -sf http://localhost/users | python3 -m json.tool
 
       - name: Résumé du déploiement
         run: |
-          echo "## 🚀 Stack déployée" >> $GITHUB_STEP_SUMMARY
-          echo "- Version  : ${{ github.sha }}"          >> $GITHUB_STEP_SUMMARY
-          echo "- Services : nginx + flask + postgres + redis" >> $GITHUB_STEP_SUMMARY
-          echo "- Registry : ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚀 Stack déployée avec succès"  >> $GITHUB_STEP_SUMMARY
+          echo "| Service  | Statut |"              >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------|"              >> $GITHUB_STEP_SUMMARY
+          echo "| postgres | ✅ healthy |"          >> $GITHUB_STEP_SUMMARY
+          echo "| redis    | ✅ healthy |"          >> $GITHUB_STEP_SUMMARY
+          echo "| flask    | ✅ healthy |"          >> $GITHUB_STEP_SUMMARY
+          echo "| nginx    | ✅ started |"          >> $GITHUB_STEP_SUMMARY
+          echo ""                                   >> $GITHUB_STEP_SUMMARY
+          echo "**Version** : ${{ github.sha }}"   >> $GITHUB_STEP_SUMMARY
