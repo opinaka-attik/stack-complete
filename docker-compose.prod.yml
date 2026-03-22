@@ -1,6 +1,5 @@
 # ─────────────────────────────────────────────────────
 # PRODUCTION — image depuis le registry
-# Usage : docker compose -f docker-compose.prod.yml up -d
 # ─────────────────────────────────────────────────────
 
 services:
@@ -19,11 +18,12 @@ services:
       - postgres_prod:/var/lib/postgresql/data
 
     healthcheck:
-      test        : ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval    : 10s
+      # ✅ Sans variables — pg_isready seul suffit pour vérifier que postgres accepte des connexions
+      test        : ["CMD-SHELL", "pg_isready"]
+      interval    : 5s
       timeout     : 5s
       retries     : 10
-      start_period: 30s
+      start_period: 20s
 
     restart: always
 
@@ -37,7 +37,7 @@ services:
 
     healthcheck:
       test        : ["CMD", "redis-cli", "ping"]
-      interval    : 10s
+      interval    : 5s
       timeout     : 5s
       retries     : 5
       start_period: 10s
@@ -47,7 +47,6 @@ services:
   # ── 3. Flask API ──────────────────────────────────
   app:
     image: ghcr.io/${GITHUB_USERNAME}/stack-complete:latest
-
     container_name: prod-api
 
     environment:
@@ -64,7 +63,7 @@ services:
 
     healthcheck:
       test        : ["CMD", "curl", "-f", "http://localhost:5000/health"]
-      interval    : 15s
+      interval    : 10s
       timeout     : 10s
       retries     : 5
       start_period: 30s

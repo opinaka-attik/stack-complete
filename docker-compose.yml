@@ -1,11 +1,9 @@
 # ─────────────────────────────────────────────────────
-# DÉVELOPPEMENT LOCAL — 4 services complets
-# Usage : docker compose up
+# DÉVELOPPEMENT LOCAL
 # ─────────────────────────────────────────────────────
 
 services:
 
-  # ── 1. PostgreSQL ─────────────────────────────────
   postgres:
     image: postgres:15-alpine
     container_name: stack-postgres
@@ -23,15 +21,14 @@ services:
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
 
     healthcheck:
-      test        : ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval    : 10s
+      test        : ["CMD-SHELL", "pg_isready"]
+      interval    : 5s
       timeout     : 5s
       retries     : 5
       start_period: 20s
 
     restart: unless-stopped
 
-  # ── 2. Redis ──────────────────────────────────────
   redis:
     image: redis:7-alpine
     container_name: stack-redis
@@ -44,14 +41,13 @@ services:
 
     healthcheck:
       test        : ["CMD", "redis-cli", "ping"]
-      interval    : 10s
+      interval    : 5s
       timeout     : 5s
       retries     : 5
       start_period: 10s
 
     restart: unless-stopped
 
-  # ── 3. Flask API ──────────────────────────────────
   app:
     build:
       context   : .
@@ -81,14 +77,13 @@ services:
 
     healthcheck:
       test        : ["CMD", "curl", "-f", "http://localhost:5000/health"]
-      interval    : 15s
+      interval    : 10s
       timeout     : 10s
       retries     : 5
       start_period: 30s
 
     restart: unless-stopped
 
-  # ── 4. Nginx ──────────────────────────────────────
   nginx:
     image: nginx:alpine
     container_name: stack-nginx
@@ -105,7 +100,6 @@ services:
 
     restart: unless-stopped
 
-# ── Volumes persistants ───────────────────────────
 volumes:
   postgres_data:
   redis_data:
