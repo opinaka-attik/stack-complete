@@ -1,0 +1,56 @@
+name: CI - Tests unitaires et intégration
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+
+  # ── Tests unitaires (rapides, sans services) ──
+  unit-tests:
+    name: ✅ Tests unitaires
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: pip install -r requirements.txt
+
+      - name: Tests unitaires avec mocks
+        run: |
+          pytest tests/test_health.py tests/test_users.py tests/test_stats.py \
+            --cov=api \
+            --cov-report=term-missing \
+            --cov-fail-under=80
+        env:
+          PYTHONPATH: .
+
+  # ── Tests d'intégration (avec vrais services) ──
+  integration-tests:
+    name: 🔗 Tests d'intégration
+    runs-on: ubuntu-latest
+    needs: unit-tests           # seulement si les tests unitaires passent
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Créer le fichier .env de test
+        run: |
+          echo "POSTGRES_DB=testdb"         > .env
+          echo "POSTGRES_USER=testuser"    >> .env
+          echo "POSTGRES_PASSWORD=testpass">> .env
+
+      - name: Lancer les services de test
+        run: |
+          docker compose -f docker-compose.test.yml \
+            --profile test up \
+            --abort-on-container-exit \
+            --exit-code-from test-runner
+
+      - name: Nettoyage
+        if: always()
+        run: docker compose -f docker-compose.test.yml down -v
