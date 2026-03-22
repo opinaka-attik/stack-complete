@@ -113,7 +113,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # ✅ Validation des secrets AVANT de continuer
+      # ── Validation des secrets avant tout ────────
       - name: Validation des secrets
         run: |
           MISSING=""
@@ -129,6 +129,7 @@ jobs:
 
           echo "✅ Tous les secrets sont définis"
 
+      # ── Création du .env ──────────────────────────
       - name: Création du .env de production
         run: |
           echo "APP_ENV=production"                                                                                                                  > .env
@@ -145,10 +146,13 @@ jobs:
           echo "Variables définies :"
           cat .env | cut -d'=' -f1
 
+      # ── Pull des images ───────────────────────────
       - name: Pull des nouvelles images
         run: docker compose -f docker-compose.prod.yml pull
 
-      # ✅ PHASE 1 — Démarrer postgres et redis seuls
+      # ─────────────────────────────────────────────
+      # PHASE 1 — PostgreSQL + Redis
+      # ─────────────────────────────────────────────
       - name: Démarrage PostgreSQL et Redis
         run: |
           docker compose -f docker-compose.prod.yml up -d postgres redis
@@ -157,7 +161,6 @@ jobs:
         run: |
           echo "Attente de PostgreSQL..."
           for i in $(seq 1 30); do
-            # Vérifier que le container n'est pas en état d'erreur
             STATE=$(docker inspect --format='{{.State.Status}}' prod-postgres 2>/dev/null || echo "missing")
             if [ "$STATE" = "exited" ] || [ "$STATE" = "missing" ]; then
               echo "❌ Container PostgreSQL arrêté — logs :"
@@ -170,7 +173,7 @@ jobs:
             fi
             echo "  → Tentative $i/30 — état: $STATE"
             if [ $i -eq 30 ]; then
-              echo "❌ Timeout — logs :"
+              echo "❌ Timeout PostgreSQL — logs :"
               docker logs prod-postgres
               exit 1
             fi
@@ -181,20 +184,28 @@ jobs:
         run: |
           echo "Attente de Redis..."
           for i in $(seq 1 20); do
+            STATE=$(docker inspect --format='{{.State.Status}}' prod-redis 2>/dev/null || echo "missing")
+            if [ "$STATE" = "exited" ] || [ "$STATE" = "missing" ]; then
+              echo "❌ Container Redis arrêté — logs :"
+              docker logs prod-redis
+              exit 1
+            fi
             if docker exec prod-redis redis-cli ping 2>/dev/null | grep -q PONG; then
               echo "✅ Redis prêt après $i tentatives !"
               break
             fi
-            echo "  → Tentative $i/20"
+            echo "  → Tentative $i/20 — état: $STATE"
             if [ $i -eq 20 ]; then
-              echo "❌ Timeout — logs :"
+              echo "❌ Timeout Redis — logs :"
               docker logs prod-redis
               exit 1
             fi
             sleep 2
           done
 
-      # ✅ PHASE 2 — Démarrer l'API Flask
+      # ─────────────────────────────────────────────
+      # PHASE 2 — Flask API
+      # ─────────────────────────────────────────────
       - name: Démarrage API Flask
         run: |
           docker compose -f docker-compose.prod.yml up -d app
@@ -209,20 +220,23 @@ jobs:
               docker logs prod-api
               exit 1
             fi
-            if docker exec prod-api curl -sf http://localhost:5000/health > /dev/null 2>&1; then
+            # ✅ Appel direct depuis le runner via port exposé
+            if curl -sf http://localhost:5000/health > /dev/null 2>&1; then
               echo "✅ API Flask prête après $i tentatives !"
               break
             fi
             echo "  → Tentative $i/30 — état: $STATE"
             if [ $i -eq 30 ]; then
-              echo "❌ Timeout — logs :"
+              echo "❌ Timeout API Flask — logs :"
               docker logs prod-api
               exit 1
             fi
             sleep 3
           done
 
-      # ✅ PHASE 3 — Démarrer Nginx
+      # ─────────────────────────────────────────────
+      # PHASE 3 — Nginx
+      # ─────────────────────────────────────────────
       - name: Démarrage Nginx
         run: |
           docker compose -f docker-compose.prod.yml up -d nginx
@@ -232,23 +246,34 @@ jobs:
         run: |
           echo "Attente de Nginx..."
           for i in $(seq 1 10); do
+            STATE=$(docker inspect --format='{{.State.Status}}' prod-nginx 2>/dev/null || echo "missing")
+            if [ "$STATE" = "exited" ] || [ "$STATE" = "missing" ]; then
+              echo "❌ Container Nginx arrêté — logs :"
+              docker logs prod-nginx
+              exit 1
+            fi
+            # ✅ Appel via port 80 — passe par Nginx → Flask
             if curl -sf http://localhost/health > /dev/null 2>&1; then
               echo "✅ Nginx prêt après $i tentatives !"
               break
             fi
-            echo "  → Tentative $i/10"
+            echo "  → Tentative $i/10 — état: $STATE"
             if [ $i -eq 10 ]; then
-              echo "❌ Timeout — logs :"
+              echo "❌ Timeout Nginx — logs :"
               docker logs prod-nginx
               exit 1
             fi
             sleep 2
           done
 
-      # ✅ Vérification finale
+      # ─────────────────────────────────────────────
+      # Vérification finale complète
+      # ─────────────────────────────────────────────
       - name: Vérification finale de la stack
         run: |
+          echo "────────────────────────────────"
           echo "── Statut des containers ──"
+          echo "────────────────────────────────"
           docker compose -f docker-compose.prod.yml ps
 
           echo ""
@@ -266,6 +291,7 @@ jobs:
       - name: Résumé du déploiement
         run: |
           echo "## 🚀 Stack déployée avec succès"       >> $GITHUB_STEP_SUMMARY
+          echo ""                                       >> $GITHUB_STEP_SUMMARY
           echo "| Service  | Statut |"                  >> $GITHUB_STEP_SUMMARY
           echo "|----------|--------|"                  >> $GITHUB_STEP_SUMMARY
           echo "| postgres | ✅ ready |"                >> $GITHUB_STEP_SUMMARY
@@ -274,3 +300,5 @@ jobs:
           echo "| nginx    | ✅ ready |"                >> $GITHUB_STEP_SUMMARY
           echo ""                                       >> $GITHUB_STEP_SUMMARY
           echo "**Version** : \`${{ github.sha }}\`"   >> $GITHUB_STEP_SUMMARY
+          echo ""                                       >> $GITHUB_STEP_SUMMARY
+          echo "**Registry** : \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest\`" >> $GITHUB_STEP_SUMMARY
