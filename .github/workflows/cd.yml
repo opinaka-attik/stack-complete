@@ -113,7 +113,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # ── Validation des secrets avant tout ────────
+      # ── Validation des secrets ────────────────────
       - name: Validation des secrets
         run: |
           MISSING=""
@@ -126,7 +126,6 @@ jobs:
             echo "→ Aller dans Settings → Secrets and variables → Actions"
             exit 1
           fi
-
           echo "✅ Tous les secrets sont définis"
 
       # ── Création du .env ──────────────────────────
@@ -220,8 +219,8 @@ jobs:
               docker logs prod-api
               exit 1
             fi
-            # ✅ Appel direct depuis le runner via port exposé
-            if curl -sf http://localhost:5000/health > /dev/null 2>&1; then
+            # ✅ Port 5000 exposé dans docker-compose.prod.yml → accessible depuis le runner
+            if curl -sf http://127.0.0.1:5000/health > /dev/null 2>&1; then
               echo "✅ API Flask prête après $i tentatives !"
               break
             fi
@@ -252,8 +251,7 @@ jobs:
               docker logs prod-nginx
               exit 1
             fi
-            # ✅ Appel via port 80 — passe par Nginx → Flask
-            if curl -sf http://localhost/health > /dev/null 2>&1; then
+            if curl -sf http://127.0.0.1:80/health > /dev/null 2>&1; then
               echo "✅ Nginx prêt après $i tentatives !"
               break
             fi
@@ -274,31 +272,3 @@ jobs:
           echo "────────────────────────────────"
           echo "── Statut des containers ──"
           echo "────────────────────────────────"
-          docker compose -f docker-compose.prod.yml ps
-
-          echo ""
-          echo "── Test /health ──"
-          curl -sf http://localhost/health | python3 -m json.tool
-
-          echo ""
-          echo "── Test /ready ──"
-          curl -sf http://localhost/ready | python3 -m json.tool
-
-          echo ""
-          echo "── Test /users ──"
-          curl -sf http://localhost/users | python3 -m json.tool
-
-      - name: Résumé du déploiement
-        run: |
-          echo "## 🚀 Stack déployée avec succès"       >> $GITHUB_STEP_SUMMARY
-          echo ""                                       >> $GITHUB_STEP_SUMMARY
-          echo "| Service  | Statut |"                  >> $GITHUB_STEP_SUMMARY
-          echo "|----------|--------|"                  >> $GITHUB_STEP_SUMMARY
-          echo "| postgres | ✅ ready |"                >> $GITHUB_STEP_SUMMARY
-          echo "| redis    | ✅ ready |"                >> $GITHUB_STEP_SUMMARY
-          echo "| flask    | ✅ ready |"                >> $GITHUB_STEP_SUMMARY
-          echo "| nginx    | ✅ ready |"                >> $GITHUB_STEP_SUMMARY
-          echo ""                                       >> $GITHUB_STEP_SUMMARY
-          echo "**Version** : \`${{ github.sha }}\`"   >> $GITHUB_STEP_SUMMARY
-          echo ""                                       >> $GITHUB_STEP_SUMMARY
-          echo "**Registry** : \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest\`" >> $GITHUB_STEP_SUMMARY

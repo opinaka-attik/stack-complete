@@ -17,7 +17,6 @@ services:
     volumes:
       - postgres_prod:/var/lib/postgresql/data
 
-    # ✅ Pas de depends_on ici — géré par le workflow
     restart: always
 
   # ── 2. Redis ──────────────────────────────────────
@@ -41,7 +40,10 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       REDIS_URL   : redis://redis:6379/0
 
-    # ✅ depends_on simple — sans condition service_healthy
+    # ✅ Port exposé sur l'hôte pour les healthchecks du runner
+    ports:
+      - "5000:5000"
+
     depends_on:
       - postgres
       - redis
