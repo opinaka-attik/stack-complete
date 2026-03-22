@@ -3,8 +3,6 @@
 # Usage : docker compose up
 # ─────────────────────────────────────────────────────
 
-version: "3.9"
-
 services:
 
   # ── 1. PostgreSQL ─────────────────────────────────
@@ -18,17 +16,18 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
 
     ports:
-      - "5432:5432"       # accessible en local pour debug
+      - "5432:5432"
 
     volumes:
-      - postgres_data:/var/lib/postgresql/data    # persistance des données
+      - postgres_data:/var/lib/postgresql/data
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
 
     healthcheck:
-      test    : ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 10s
-      timeout : 5s
-      retries : 5
+      test        : ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval    : 10s
+      timeout     : 5s
+      retries     : 5
+      start_period: 20s
 
     restart: unless-stopped
 
@@ -38,16 +37,17 @@ services:
     container_name: stack-redis
 
     ports:
-      - "6379:6379"       # accessible en local pour debug
+      - "6379:6379"
 
     volumes:
       - redis_data:/data
 
     healthcheck:
-      test    : ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout : 5s
-      retries : 5
+      test        : ["CMD", "redis-cli", "ping"]
+      interval    : 10s
+      timeout     : 5s
+      retries     : 5
+      start_period: 10s
 
     restart: unless-stopped
 
@@ -71,23 +71,20 @@ services:
       - "5000:5000"
 
     volumes:
-      - ./api:/app/api    # rechargement à chaud en dev
+      - ./api:/app/api
 
     depends_on:
       postgres:
-        condition: service_healthy    # attend PostgreSQL
+        condition: service_healthy
       redis:
-        condition: service_healthy    # attend Redis
+        condition: service_healthy
 
-    # ✅ Par ça
     healthcheck:
-      test: ["CMD", "python", "-c",
-            "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
-      interval: 15s
-      timeout : 10s
-      retries : 3
-      start_period: 20s
-
+      test        : ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval    : 15s
+      timeout     : 10s
+      retries     : 5
+      start_period: 30s
 
     restart: unless-stopped
 
@@ -97,18 +94,18 @@ services:
     container_name: stack-nginx
 
     ports:
-      - "80:80"           # point d'entrée unique
+      - "80:80"
 
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
 
     depends_on:
       app:
-        condition: service_healthy    # attend Flask
+        condition: service_healthy
 
     restart: unless-stopped
 
 # ── Volumes persistants ───────────────────────────
 volumes:
-  postgres_data:    # données PostgreSQL survivent aux restarts
-  redis_data:       # données Redis survivent aux restarts
+  postgres_data:
+  redis_data:
