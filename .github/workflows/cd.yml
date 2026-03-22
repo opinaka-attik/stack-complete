@@ -113,6 +113,22 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # ✅ Validation des secrets AVANT de continuer
+      - name: Validation des secrets
+        run: |
+          MISSING=""
+          [ -z "${{ secrets.POSTGRES_DB }}"       ] && MISSING="$MISSING POSTGRES_DB"
+          [ -z "${{ secrets.POSTGRES_USER }}"     ] && MISSING="$MISSING POSTGRES_USER"
+          [ -z "${{ secrets.POSTGRES_PASSWORD }}" ] && MISSING="$MISSING POSTGRES_PASSWORD"
+
+          if [ -n "$MISSING" ]; then
+            echo "❌ Secrets manquants ou vides :$MISSING"
+            echo "→ Aller dans Settings → Secrets and variables → Actions"
+            exit 1
+          fi
+
+          echo "✅ Tous les secrets sont définis"
+
       - name: Création du .env de production
         run: |
           echo "APP_ENV=production"                                                                                                                  > .env
@@ -137,36 +153,41 @@ jobs:
         run: |
           docker compose -f docker-compose.prod.yml up -d postgres redis
 
-      # ✅ Attendre PostgreSQL avec boucle manuelle
       - name: Attente PostgreSQL prêt
         run: |
           echo "Attente de PostgreSQL..."
           for i in $(seq 1 30); do
-            if docker exec prod-postgres pg_isready -q; then
-              echo "✅ PostgreSQL prêt après $i tentatives"
+            # Vérifier que le container n'est pas en état d'erreur
+            STATE=$(docker inspect --format='{{.State.Status}}' prod-postgres 2>/dev/null || echo "missing")
+            if [ "$STATE" = "exited" ] || [ "$STATE" = "missing" ]; then
+              echo "❌ Container PostgreSQL arrêté — logs :"
+              docker logs prod-postgres
+              exit 1
+            fi
+            if docker exec prod-postgres pg_isready -q 2>/dev/null; then
+              echo "✅ PostgreSQL prêt après $i tentatives !"
               break
             fi
-            echo "  → Tentative $i/30 — pas encore prêt..."
+            echo "  → Tentative $i/30 — état: $STATE"
             if [ $i -eq 30 ]; then
-              echo "❌ Timeout PostgreSQL — logs :"
+              echo "❌ Timeout — logs :"
               docker logs prod-postgres
               exit 1
             fi
             sleep 3
           done
 
-      # ✅ Attendre Redis
       - name: Attente Redis prêt
         run: |
           echo "Attente de Redis..."
           for i in $(seq 1 20); do
-            if docker exec prod-redis redis-cli ping | grep -q PONG; then
-              echo "✅ Redis prêt après $i tentatives"
+            if docker exec prod-redis redis-cli ping 2>/dev/null | grep -q PONG; then
+              echo "✅ Redis prêt après $i tentatives !"
               break
             fi
-            echo "  → Tentative $i/20 — pas encore prêt..."
+            echo "  → Tentative $i/20"
             if [ $i -eq 20 ]; then
-              echo "❌ Timeout Redis — logs :"
+              echo "❌ Timeout — logs :"
               docker logs prod-redis
               exit 1
             fi
@@ -182,13 +203,19 @@ jobs:
         run: |
           echo "Attente de l'API Flask..."
           for i in $(seq 1 30); do
+            STATE=$(docker inspect --format='{{.State.Status}}' prod-api 2>/dev/null || echo "missing")
+            if [ "$STATE" = "exited" ] || [ "$STATE" = "missing" ]; then
+              echo "❌ Container API arrêté — logs :"
+              docker logs prod-api
+              exit 1
+            fi
             if docker exec prod-api curl -sf http://localhost:5000/health > /dev/null 2>&1; then
-              echo "✅ API Flask prête après $i tentatives"
+              echo "✅ API Flask prête après $i tentatives !"
               break
             fi
-            echo "  → Tentative $i/30 — pas encore prête..."
+            echo "  → Tentative $i/30 — état: $STATE"
             if [ $i -eq 30 ]; then
-              echo "❌ Timeout API — logs :"
+              echo "❌ Timeout — logs :"
               docker logs prod-api
               exit 1
             fi
@@ -199,26 +226,26 @@ jobs:
       - name: Démarrage Nginx
         run: |
           docker compose -f docker-compose.prod.yml up -d nginx
+          sleep 3
 
       - name: Attente Nginx prêt
         run: |
-          sleep 3
           echo "Attente de Nginx..."
           for i in $(seq 1 10); do
             if curl -sf http://localhost/health > /dev/null 2>&1; then
-              echo "✅ Nginx prêt après $i tentatives"
+              echo "✅ Nginx prêt après $i tentatives !"
               break
             fi
-            echo "  → Tentative $i/10 — pas encore prêt..."
+            echo "  → Tentative $i/10"
             if [ $i -eq 10 ]; then
-              echo "❌ Timeout Nginx — logs :"
+              echo "❌ Timeout — logs :"
               docker logs prod-nginx
               exit 1
             fi
             sleep 2
           done
 
-      # ✅ Vérification finale complète
+      # ✅ Vérification finale
       - name: Vérification finale de la stack
         run: |
           echo "── Statut des containers ──"
@@ -238,12 +265,12 @@ jobs:
 
       - name: Résumé du déploiement
         run: |
-          echo "## 🚀 Stack déployée avec succès"  >> $GITHUB_STEP_SUMMARY
-          echo "| Service  | Statut |"              >> $GITHUB_STEP_SUMMARY
-          echo "|----------|--------|"              >> $GITHUB_STEP_SUMMARY
-          echo "| postgres | ✅ healthy |"          >> $GITHUB_STEP_SUMMARY
-          echo "| redis    | ✅ healthy |"          >> $GITHUB_STEP_SUMMARY
-          echo "| flask    | ✅ healthy |"          >> $GITHUB_STEP_SUMMARY
-          echo "| nginx    | ✅ started |"          >> $GITHUB_STEP_SUMMARY
-          echo ""                                   >> $GITHUB_STEP_SUMMARY
-          echo "**Version** : ${{ github.sha }}"   >> $GITHUB_STEP_SUMMARY
+          echo "## 🚀 Stack déployée avec succès"       >> $GITHUB_STEP_SUMMARY
+          echo "| Service  | Statut |"                  >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------|"                  >> $GITHUB_STEP_SUMMARY
+          echo "| postgres | ✅ ready |"                >> $GITHUB_STEP_SUMMARY
+          echo "| redis    | ✅ ready |"                >> $GITHUB_STEP_SUMMARY
+          echo "| flask    | ✅ ready |"                >> $GITHUB_STEP_SUMMARY
+          echo "| nginx    | ✅ ready |"                >> $GITHUB_STEP_SUMMARY
+          echo ""                                       >> $GITHUB_STEP_SUMMARY
+          echo "**Version** : \`${{ github.sha }}\`"   >> $GITHUB_STEP_SUMMARY
