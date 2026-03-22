@@ -1,5 +1,7 @@
 from flask import Blueprint, jsonify
 import os
+from api.database import get_connection   # ✅ import au niveau module
+from api.cache    import get_redis        # ✅ import au niveau module
 
 health_bp = Blueprint("health", __name__)
 
@@ -13,12 +15,8 @@ def health():
 
 @health_bp.route("/ready")
 def ready():
-    """Vérifie que tous les services sont disponibles"""
-    from api.database import get_connection
-    from api.cache    import get_redis
     checks = {}
 
-    # Vérif PostgreSQL
     try:
         conn = get_connection()
         conn.close()
@@ -26,7 +24,6 @@ def ready():
     except Exception as e:
         checks["postgres"] = f"error: {str(e)}"
 
-    # Vérif Redis
     try:
         r = get_redis()
         r.ping()
